@@ -1,0 +1,106 @@
+---
+title: "Lab2_MUSA508_LH"
+author: "Lechuan Huang"
+date: "9/10/2021"
+output: github_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+In this lab I want to investigate the area where cultural-Chinese population living close to the 3 major Universities (University of Pennsylvania, Drexel University and Temple University) in Philadelphia.
+
+# Preparation
+Library used
+```{r setup_package, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(tidycensus)
+library(sf)
+library(tmap) # mapping, install if you don't have it
+set.seed(717)
+```
+
+Load data from {tidycensus}
+```{r load_key_hide, warning= FALSE}
+census_api_key("[LH's API Key]", overwrite = TRUE)
+```
+
+# Find variables and locations
+Find two new variables from the 2019 ACS data to load
+```{r load_variables, cache = TRUE}
+acs_variable_list.2019 <- load_variables(2019, #year
+                                         "acs5", #five year ACS estimates
+                                         cache = TRUE)
+```
+
+From acs_variable_list.2019, I choose the variables related to certain Asian ethnic population
+```{r acs_vars}
+acs_vars <- c("B02015_001E",  #Estimate!!Total
+              "B02015_007E",  #Estimate!!Total:!!Chinese, except Taiwanese
+              "B02015_020E")  #Estimate!!Total:!!Taiwanese
+```
+
+Neibgborhood I chose: University City (approx) and Temple University
+```{r myTracts}
+myTracts <- c("42101036900", 
+              "42101009000", 
+              "42101009100", 
+              "42101008801", 
+              "42101008802",
+              "42101037700")
+```
+
+# Clean, rename and mutate
+I combined the Chinese population (exclude Taiwanese) and Taiwanese population categories in the ACS data to be "culturally Chinese", then calculated the percentage of "Culturally Chinese" by the total population in the census tract.
+
+```{r acs_vars2, cache = TRUE, message = FALSE, warning = FALSE, results=FALSE}
+acsTractsPHL.2019.sf <- get_acs(geography = "tract",
+                             year = 2019, 
+                             variables = acs_vars, 
+                             geometry = TRUE, 
+                             state = "PA", 
+                             county = "Philadelphia", 
+                             output = "wide") %>% 
+  dplyr::select (GEOID, NAME, all_of(acs_vars)) %>%
+  rename (total_pop.2019 = B02015_001E,
+          Chinese_exclude_TWN.2019 = B02015_007E,
+          Taiwanese.2019 = B02015_020E) %>%
+  mutate(Total_Cultural_CHN.2019=Chinese_exclude_TWN.2019+Taiwanese.2019,
+         PCT_Cultural_CHN.2019 = Total_Cultural_CHN.2019/total_pop.2019) %>%
+  mutate(Uni_EastAsian = ifelse(GEOID %in% myTracts, "Penn_Drexel_Temple", "REST OF PHILADELPHIA"))
+```
+
+Transform to WGS84 with {sf}
+```{r}
+acsTractsPHL.2019.sf <- acsTractsPHL.2019.sf %>% 
+  st_transform(crs = "EPSG:4326")
+```
+# Plot with {ggplot2}
+I included communities with more than 300 Chinese populations and communities with 70% populations being cultural Chinese.
+
+```{r ggplot_geom_sf, warning = FALSE, echo = FALSE}
+ggplot()+
+  geom_sf(data = acsTractsPHL.2019.sf, aes(fill = "Chinese population"),
+          color = "transparent", show.legend = "fill")+
+  geom_sf(data = acsTractsPHL.2019.sf %>%
+          filter(PCT_Cultural_CHN.2019>0.7) %>%
+          st_union(),
+          color = "grey",
+          fill = "yellow",
+          aes(fill = '70%'))+
+  geom_sf(data = acsTractsPHL.2019.sf %>%
+          filter(Total_Cultural_CHN.2019>300) %>%
+          st_union(),
+          color = "grey",
+          fill = "orange",
+          show.legend = "fill")+
+  geom_sf(data = acsTractsPHL.2019.sf %>%
+          filter(Uni_EastAsian =="Penn_Drexel_Temple") %>%
+          st_union(),
+          color = "black",
+          fill = "transparent")+
+  # Bonus to figure out different color ramps with scale_fill_viridis()
+  labs(
+    title = "Chinese communities near 3 major universities in PHL",
+    subtitle = ,#I don't need this here
+    caption = "(Includes both self-identified Chinese and Taiwanese from the ACS data)")
+```
